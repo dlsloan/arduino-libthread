@@ -41,7 +41,7 @@ void *__attribute__((noinline)) asm_task_init(void *func, void* data, void *stac
 	return _asm_task_init(func, data, stack + stackLen, &_asm_task_start);
 }
 
-void *__attribute__((naked)) __attribute__((noinline)) asm_task_swap(void* nextStack) {
+void __attribute__((naked)) __attribute__((noinline)) asm_task_swap(void **currentStack, void* nextStack) {
 asm(
 	//Entry Task
 	"push {lr};"
@@ -53,9 +53,9 @@ asm(
 	"mov r6, r12;"
 	"push {r2-r6};"
 	//Switch stack
-	"mov r1, sp;"
-	"mov sp, r0;"
-	"mov r0, r1;"
+	"mov r3, sp;"
+	"str r3, [r0];"
+	"mov sp, r1;"
 	//Exit Task
 	"pop {r1-r5};"
 	"mov r8, r1;"
