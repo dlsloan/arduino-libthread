@@ -27,12 +27,16 @@ public:
 	_thread *next;
 	void *sp;
 	bool _active;
+	bool done;
+	void *data;
+	void *(*func)(void *);
 
 	_thread();
 	_thread(void *(*func)(void *), void *data, void *stack, int stacksize);
 	bool active() { return this == &main_thread || _active; }
 	void activate();
 	void deactivate();
+	void *join();
 };
 
 template<int depth=256>
