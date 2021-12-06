@@ -1,38 +1,46 @@
+// Define threading specific features (yield and int handlers in header in main
+// arduino file to allow lib install without poluting other projects)
+#ifndef LIB_DEP
+#ifndef __thread_h__lib_deb
+#define __thread_h__lib_deb
+	#include "asm_coop.cpp.h"
+
+	void yield() {
+		__sync_synchronize();
+		SCB->ICSR |= SCB_ICSR_PENDSVSET_Msk;
+	}
+#endif
+#endif
+
 #ifndef __thread_h
 #define __thread_h
 
-#include <asm_coop.h>
 #include <stdint.h>
 
 class _thread {
 public:
-	_thread();
+	static _thread main_thread;
+	static _thread *active_thread;
 
-	void join();
+	static void *swap(void *sp);
 
-	static void swap();
-protected:
-	bool running;
+	_thread *next;
 	void *sp;
+	bool _active;
 
-	void init();
+	_thread();
+	_thread(void *(*func)(void *), void *data, void *stack, int stacksize);
+	bool active() { return this == &main_thread || _active; }
 	void activate();
 	void deactivate();
-
-private:
-	_thread *prev, *next;
-
-	static _thread *active;
-	static _thread *idle;
 };
 
 template<int depth=256>
-class thread : _thread {
+class thread: public _thread {
 public:
-	thread(ThreadFunc func, void *param=nullptr) : _thread() {
-		sp = asm_task_init(func, param, stack, sizeof(stack));
-	}
-private:
+	thread(void *(*func)(void*), void *data) :
+		_thread(func, data, stack, sizeof(stack)) {}
+
 	uint32_t stack[depth];
 };
 

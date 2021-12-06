@@ -1,108 +1,63 @@
 #include <stdint.h>
 #include <Arduino.h>
 
+extern void *cpp_swap(void *sp);
+
 extern "C" {
-static void _asm_task_run(ThreadFunc func, void *data) {
-	func(data);
-	task_fail();
-}
 
-#define sp_push(sp, value) ({		\
-	(sp) = (uint32_t *)(sp) - 1;	\
-	*(uint32_t *)(sp) = (uint32_t)(value);	\
-})
+struct init_thread_stack {
+	uint32_t r8;
+	uint32_t r9;
+	uint32_t r10;
+	uint32_t r11;
+	uint32_t r4;
+	uint32_t r5;
+	uint32_t r6;
+	uint32_t r7;
+	uint32_t r0;
+	uint32_t r1;
+	uint32_t r2;
+	uint32_t r3;
+	uint32_t r12;
+	uint32_t lr;
+	uint32_t pc;
+uint32_t xPSR;
+} __attribute__ ((packed));
 
-
-void asm_coop_init() {
-	NVIC_SetPriority(PendSV_IRQn, ~0);
+void *asm_task_init(void *(*func)(void *), void *data, void *new_stack, int new_stack_size) {
+	NVIC_SetPriority(PendSV_IRQn, 0xff);
 	NVIC_EnableIRQ(PendSV_IRQn);
-}
-
-void *asm_task_init(ThreadFunc func, void* data, void *stack, int stackLen) {
-	//Simple wrapper for assembly function, converts the stack buffer to
-	//stack pointer base and sets special task start function address.
-
-	//In the samd (ARM Cortex M0) stacks work backwards from the end of a
-	//buffer to the start and write 1 entry back, so we convert the stack
-	//address to the next element past the end of the buffer an pass it to
-	//the assembly init function.
-	stack = stack + stackLen;
-
-	//Initialize task stack with task run function entry point and arguments
-	//r0 -> first param, r1 -> second param
-	sp_push(stack, _asm_task_run);	//lr
-	sp_push(stack, 0);	//r7
-	sp_push(stack, 0);	//r6
-	sp_push(stack, 0);	//r5
-	sp_push(stack, 0);	//r4
-	sp_push(stack, 0);	//r3
-	sp_push(stack, 0);	//r2
-	sp_push(stack, data);	//r1
-	sp_push(stack, func);	//r0
-	sp_push(stack, 0);	//r12
-	sp_push(stack, 0);	//r11
-	sp_push(stack, 0);	//r10
-	sp_push(stack, 0);	//r9
-	sp_push(stack, 0);	//r8
-	sp_push(stack, 0);	//apsr
+	struct init_thread_stack *stack = (struct init_thread_stack *)((char *)new_stack + new_stack_size - sizeof(*stack));
+	stack->r0 = (uint32_t)data;
+	stack->pc = (uint32_t)func & 0xfffffffe;
+	stack->xPSR = (1 << 24);
 	return stack;
 }
 
-void __attribute__((naked)) __attribute__((noinline)) swap_tasks(void **csp, void* nsp)
-{
-
+void *__attribute__((noinline)) _advance(void *sp) {
+	return cpp_swap(sp);
 }
 
-void PendSV_Handler(void) {
-	swap_tasks(_csp, _nsp);
-}
-/*
 void __attribute__((naked)) __attribute__((noinline)) PendSV_Handler(void) {
 	asm(
-		"bx lr;"
-	);
-
-}
-//*/
-
-void __attribute__((naked)) __attribute__((noinline)) asm_task_swap(void **currentStack, void* nextStack) {
-	//C to asm translation (params0-3 -> r0-r3)
-	//  currentStack -> r0
-	//  nextStack -> r1
-	SCB->ICSR = SCB_ICSR_PENDSVSET_Msk;
-	asm(
-		//-- Current Task --
-		//    Store current task exec location
-		"push {lr};"
-		//    Backup current task cpu state
+		"mov r0, r8;"
+		"mov r1, r9;"
+		"mov r2, r10;"
+		"mov r3, r11;"
 		"push {r0-r7};"
-		"mov r2, r8;"
-		"mov r3, r9;"
-		"mov r4, r10;"
-		"mov r5, r11;"
-		"mov r6, r12;"
-		"push {r2-r6};"
-		"mrs r3, apsr;"
-		"push {r3};"
-		//-- Switch Tasks --
-		//    Write current task stack pointer
-		"mov r3, sp;"
-		"str r3, [r0];"
-		//    Switch to next task stack
-		"mov sp, r1;"
-		//-- Next Task --
-		//    Restore cpu state of next task
-		"pop {r3};"
-		"msr apsr, r0;"
-		"pop {r1-r5};"
-		"mov r8, r1;"
-		"mov r9, r2;"
-		"mov r10, r3;"
-		"mov r11, r4;"
-		"mov r12, r5;"
+		// swap tasks
+		"mov r0, sp;"
+		"bl _advance;"
+		"mov sp, r0;"
+		// done swap tasks
 		"pop {r0-r7};"
-		//    Load next task's exec location and resume execution
-		"pop {pc};"
+		"mov r11, r3;"
+		"mov r10, r2;"
+		"mov r9, r1;"
+		"mov r8, r0;"
+		// return from exception
+		"ldr r0, =#0xfffffff9;"
+		"bx r0;"
 	);
 }
 

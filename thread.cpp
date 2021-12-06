@@ -1,39 +1,48 @@
+#define LIB_DEP
 #include <Arduino.h>
+#include <asm_coop.h>
 #include <thread.h>
 
-_thread *_thread::active = nullptr;
-_thread *_thread::idle = nullptr;
+_thread _thread::main_thread;
+_thread *_thread::active_thread = &_thread::main_thread;
 
-_thread main_thread;
-
-_thread::_thread() : running(true) {
-	if (_thread::active == nullptr) {
-		_thread::active = this;
-		prev = this;
-		next = this;
-	} else {
-		prev = _thread::active;
-		next = _thread::active->next;
-		next->prev = this;
-		prev->next = this;
-	}
+_thread::_thread() : sp(nullptr), _active(false) {
+	next = this;
 }
 
-//void yield() {
-//	_thread::swap();
-//}
+_thread::_thread(void *(*func)(void *), void *data, void *stack, int stacksize):
+		 _active(false)
+{
+	next = this;
+	sp = asm_task_init(func, data, stack, stacksize);
+}
 
-void _thread::swap() {
+void _thread::activate() {
+	noInterrupts();
 	__sync_synchronize();
-	if (_thread::active->next != _thread::active) {
-		_thread *current = _thread::active;
-		_thread::active = _thread::active->next;
-		__sync_synchronize();
-		asm_task_swap(&current->sp, _thread::active->sp);
-	}
+	if (this->active())
+		goto out;
+	this->next = _thread::active_thread->next;
+	_thread::active_thread->next = this;
+out:
+	__sync_synchronize();
+	interrupts();
 }
 
-void _thread::join() {
-	while (running)
-		yield();
+void _thread::deactivate() {
+	_active = false;
+	yield();
+}
+
+void *_thread::swap(void *sp) {
+	_thread::active_thread->sp = sp;
+	if (!_thread::active_thread->_active) {
+		// todo: deactivate
+	}
+	_thread::active_thread = _thread::active_thread->next;
+	return _thread::active_thread->sp;
+}
+
+void *cpp_swap(void *sp) {
+	return _thread::swap(sp);
 }
