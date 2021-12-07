@@ -17,23 +17,35 @@
 
 #include <stdint.h>
 
+static void *thread_start(void *_th);
+void *cpp_swap(void *sp);
+
 class _thread {
-public:
+private:
+	friend void *thread_start(void *_th);
+	friend void *cpp_swap(void *sp);
+
 	static _thread main_thread;
-	static _thread *active_thread;
+	static _thread *current_thread;
+	static _thread *next_thread;
 
-	static void *swap(void *sp);
-
-	_thread *next;
+	_thread *active_lst_next;
+	_thread *active_lst_prev;
+	_thread *mtx_lst_next;
+	_thread *mtx_lst_prev;
 	void *sp;
-	bool _active;
-	bool done;
 	void *data;
 	void *(*func)(void *);
 
 	_thread();
+
+	void _crit_add_to_active();
+	void _crit_remove_from_active();
+
+public:
 	_thread(void *(*func)(void *), void *data, void *stack, int stacksize);
-	bool active() { return this == &main_thread || _active; }
+	bool active();
+	bool done();
 	void activate();
 	void deactivate();
 	void *join();

@@ -1,63 +1,94 @@
 #define LIB_DEP
 #include <Arduino.h>
+#include <assert.h>
 #include <asm_coop.h>
 #include <thread.h>
 
 _thread _thread::main_thread;
-_thread *_thread::active_thread = &_thread::main_thread;
+_thread *_thread::current_thread = &_thread::main_thread;
+_thread *_thread::next_thread = &_thread::main_thread;
 
 static void *thread_start(void *_th) {
 	_thread *th = (_thread *)_th;
 	th->data = th->func(th->data);
-	th->done = true;
-	th->deactivate();
+	th->func = nullptr;
+	noInterrupts();
+	__sync_synchronize();
+	th->_crit_remove_from_active();
+	__sync_synchronize();
+	interrupts();
+	yield();
 }
 
-_thread::_thread() : sp(nullptr), _active(false), done(false), data(nullptr) {
-	next = this;
-}
+_thread::_thread() : active_lst_next(this), active_lst_prev(this),
+	mtx_lst_next(nullptr), mtx_lst_prev(nullptr), sp(nullptr),
+	data(nullptr), func(nullptr) {}
 
 _thread::_thread(void *(*func)(void *), void *data, void *stack, int stacksize):
-		 _active(false), done(false), data(nullptr), func(func)
+		active_lst_next(nullptr), active_lst_prev(nullptr),
+		mtx_lst_next(nullptr), mtx_lst_prev(nullptr),
+		data(nullptr), func(func)
 {
-	next = this;
 	sp = asm_task_init(thread_start, this, stack, stacksize);
+}
+
+bool _thread::active() {
+	return !this->done() && (this->active_lst_next != nullptr);
+}
+
+bool _thread::done() {
+	return this->func == nullptr;
+}
+
+void _thread::_crit_add_to_active() {
+	assert(!this->done());
+	this->active_lst_next = _thread::next_thread;
+	this->active_lst_prev = _thread::next_thread->active_lst_prev;
+	_thread::next_thread->active_lst_prev->active_lst_next = this;
+	_thread::next_thread->active_lst_prev = this;
+}
+
+void _thread::_crit_remove_from_active() {
+	if (this == _thread::next_thread) {
+		assert(this->active_lst_next != this);
+		_thread::next_thread = _thread::next_thread->active_lst_next;
+	}
+	this->active_lst_next->active_lst_prev = this->active_lst_prev;
+	this->active_lst_prev->active_lst_next = this->active_lst_next;
 }
 
 void _thread::activate() {
 	noInterrupts();
 	__sync_synchronize();
-	if (this->active() || this->done)
+	if (this->active() || this->done())
 		goto out;
-	this->next = _thread::active_thread->next;
-	_thread::active_thread->next = this;
+
+	this->_crit_add_to_active();
 out:
 	__sync_synchronize();
 	interrupts();
 }
 
 void _thread::deactivate() {
-	_active = false;
+	noInterrupts();
+	__sync_synchronize();
+	this->_crit_remove_from_active();
+	__sync_synchronize();
+	interrupts();
 	yield();
 }
 
-void *_thread::swap(void *sp) {
-	_thread::active_thread->sp = sp;
-	if (!_thread::active_thread->_active) {
-		// todo: deactivate
-	}
-	_thread::active_thread = _thread::active_thread->next;
-	return _thread::active_thread->sp;
-}
-
 void *_thread::join() {
-	//todo fail on active thread
-	while (!this->done)
+	assert(_thread::current_thread != this);
+	while (!this->done())
 		yield();
 
 	return this->data;
 }
 
 void *cpp_swap(void *sp) {
-	return _thread::swap(sp);
+	_thread::current_thread->sp = sp;
+	_thread::current_thread = _thread::next_thread;
+	_thread::next_thread = _thread::next_thread->active_lst_next;
+	return _thread::current_thread->sp;
 }
