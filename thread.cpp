@@ -3,6 +3,8 @@
 #include <assert.h>
 #include <asm_coop.h>
 #include <thread.h>
+#include <mutex.h>
+#include <lock.h>
 
 _thread _thread::main_thread;
 _thread *_thread::current_thread = &_thread::main_thread;
@@ -17,17 +19,18 @@ static void *thread_start(void *_th) {
 	th->_crit_remove_from_active();
 	__sync_synchronize();
 	interrupts();
+	th->join_mtx.unlock();
 	yield();
 }
 
 _thread::_thread() : active_lst_next(this), active_lst_prev(this),
 	mtx_lst_next(nullptr), mtx_lst_prev(nullptr), sp(nullptr),
-	data(nullptr), func(nullptr) {}
+	data(nullptr), func(nullptr), join_mtx(this) {}
 
 _thread::_thread(void *(*func)(void *), void *data, void *stack, int stacksize):
 		active_lst_next(nullptr), active_lst_prev(nullptr),
 		mtx_lst_next(nullptr), mtx_lst_prev(nullptr),
-		data(nullptr), func(func)
+		data(nullptr), func(func), join_mtx(this)
 {
 	sp = asm_task_init(thread_start, this, stack, stacksize);
 }
@@ -80,9 +83,7 @@ void _thread::deactivate() {
 
 void *_thread::join() {
 	assert(_thread::current_thread != this);
-	while (!this->done())
-		yield();
-
+	lock lck(&this->join_mtx);
 	return this->data;
 }
 

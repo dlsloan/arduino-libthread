@@ -16,12 +16,14 @@
 #define __thread_h
 
 #include <stdint.h>
+#include <mutex.h>
 
 static void *thread_start(void *_th);
 void *cpp_swap(void *sp);
 
 class _thread {
 private:
+	friend class mutex;
 	friend void *thread_start(void *_th);
 	friend void *cpp_swap(void *sp);
 
@@ -36,6 +38,7 @@ private:
 	void *sp;
 	void *data;
 	void *(*func)(void *);
+	mutex join_mtx;
 
 	_thread();
 
