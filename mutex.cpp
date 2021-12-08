@@ -29,12 +29,16 @@ bool mutex::trylock() {
 	return false;
 }
 
-void mutex::unlock() {
-	critical crit;
+void mutex::_crit_unlock() {
 	if (this->pending == nullptr) {
 		this->owner = nullptr;
 		return;
 	}
 	this->owner = this->pending;
 	this->owner->_change_lst(&_thread::active_threads);
+}
+
+void mutex::unlock() {
+	critical crit;
+	this->_crit_unlock();
 }

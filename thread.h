@@ -25,6 +25,7 @@ class _thread {
 private:
 	friend class mutex;
 	friend class event;
+	friend class condition_variable;
 	friend void *thread_start(void *_th);
 	friend void *cpp_swap(void *sp);
 
