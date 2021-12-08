@@ -1,4 +1,5 @@
 #define LIB_DEP
+#include <critical.h>
 #include <thread.h>
 #include <mutex.h>
 
@@ -6,46 +7,34 @@
 #include <assert.h>
 
 void mutex::lock() {
-	noInterrupts();
-	__sync_synchronize();
-	assert(this->owner != _thread::current_thread);
-	if (this->owner == nullptr) {
-		this->owner = _thread::current_thread;
-		__sync_synchronize();
-		interrupts();
-		return;
+	{
+		critical crit;
+		assert(this->owner != _thread::current_thread);
+		if (this->owner == nullptr) {
+			this->owner = _thread::current_thread;
+			return;
+		}
+		_thread::current_thread->_change_lst(&this->pending);
 	}
-	_thread::current_thread->_change_lst(&this->pending);
-	__sync_synchronize();
-	interrupts();
 	yield();
 }
 
 bool mutex::trylock() {
-	noInterrupts();
-	__sync_synchronize();
+	critical crit;
 	assert(this->owner != _thread::current_thread);
 	if (this->owner == nullptr) {
 		this->owner = _thread::current_thread;
-		__sync_synchronize();
-		interrupts();
 		return true;
 	}
-	__sync_synchronize();
-	interrupts();
 	return false;
 }
 
 void mutex::unlock() {
-	noInterrupts();
-	__sync_synchronize();
+	critical crit;
 	if (this->pending == nullptr) {
 		this->owner = nullptr;
-		goto out;
+		return;
 	}
 	this->owner = this->pending;
 	this->owner->_change_lst(&_thread::active_threads);
-out:
-	__sync_synchronize();
-	interrupts();
 }

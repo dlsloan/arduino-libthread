@@ -2,6 +2,7 @@
 #include <Arduino.h>
 #include <assert.h>
 #include <asm_coop.h>
+#include <critical.h>
 #include <thread.h>
 #include <mutex.h>
 #include <lock.h>
@@ -14,11 +15,10 @@ static void *thread_start(void *_th) {
 	_thread *th = (_thread *)_th;
 	th->data = th->func(th->data);
 	th->func = nullptr;
-	noInterrupts();
-	__sync_synchronize();
-	th->_change_lst(nullptr);
-	__sync_synchronize();
-	interrupts();
+	{
+		critical crit;
+		th->_change_lst(nullptr);
+	}
 	th->join_mtx.unlock();
 	yield();
 }
@@ -78,23 +78,18 @@ void _thread::_change_lst(_thread **lst) {
 }
 
 void _thread::activate() {
-	noInterrupts();
-	__sync_synchronize();
+	critical crit;
 	if (this->active() || this->done())
-		goto out;
+		return;
 
 	this->_change_lst(&_thread::active_threads);
-out:
-	__sync_synchronize();
-	interrupts();
 }
 
 void _thread::deactivate() {
-	noInterrupts();
-	__sync_synchronize();
-	this->_change_lst(nullptr);
-	__sync_synchronize();
-	interrupts();
+	{
+		critical crit;
+		this->_change_lst(nullptr);
+	}
 	yield();
 }
 
