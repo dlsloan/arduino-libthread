@@ -6,25 +6,33 @@
 
 event::event() : pending(nullptr) {}
 
-void event::wait() {
+void event::wait(bool reset) {
+    while (true)
     {
-        critical crit;
-        _thread::current_thread->_change_lst(&this->pending);
+        {
+            critical crit;
+            if (this->sig) {
+                if (reset)
+                    this->sig = false;
+                else if (this->pending != nullptr)
+                    this->pending->_change_lst(&_thread::active_threads);
+                return;
+            }
+            _thread::current_thread->_change_lst(&this->pending);
+        }
+        yield();
     }
-    yield();
 }
 
 void event::signal() {
     critical crit;
-    _thread *th = this->pending;
-    if (th == nullptr)
+    this->sig = true;
+    if (this->pending == nullptr)
         return;
-    th->_change_lst(&_thread::active_threads);
+    this->pending->_change_lst(&_thread::active_threads);
 }
 
-void event::broadcast() {
+void event::reset() {
     critical crit;
-    while(this->pending != nullptr) {
-        this->pending->_change_lst(&_thread::active_threads);
-    }
+    this->sig = false;
 }

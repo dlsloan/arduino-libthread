@@ -5,12 +5,13 @@ class _thread;
 
 class event {
     _thread *pending;
+    bool sig;
 public:
     event();
 
-    void wait();
+    void wait(bool reset=false);
     void signal();
-    void broadcast();
+    void reset();
 };
 
 #endif
