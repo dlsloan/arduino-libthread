@@ -29,21 +29,19 @@ private:
 
 	static _thread main_thread;
 	static _thread *current_thread;
-	static _thread *next_thread;
+	static _thread *active_threads;
 
-	_thread *active_lst_next;
-	_thread *active_lst_prev;
-	_thread *mtx_lst_next;
-	_thread *mtx_lst_prev;
+	_thread **lst;
+	_thread *next;
+	_thread *prev;
 	void *sp;
 	void *data;
 	void *(*func)(void *);
 	mutex join_mtx;
 
-	_thread();
+	_thread(_thread **lst);
 
-	void _crit_add_to_active();
-	void _crit_remove_from_active();
+	void _change_lst(_thread **lst);
 
 public:
 	_thread(void *(*func)(void *), void *data, void *stack, int stacksize);

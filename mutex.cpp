@@ -15,19 +15,7 @@ void mutex::lock() {
 		interrupts();
 		return;
 	}
-	if (this->pending == nullptr) {
-		_thread::current_thread->mtx_lst_next = _thread::current_thread;
-		_thread::current_thread->mtx_lst_prev = _thread::current_thread;
-		this->pending = _thread::current_thread;
-	} else {
-		_thread::current_thread->mtx_lst_next = this->pending;
-		_thread::current_thread->mtx_lst_prev =
-				this->pending->mtx_lst_prev;
-		this->pending->mtx_lst_prev->mtx_lst_next =
-				_thread::current_thread;
-		this->pending->mtx_lst_prev = _thread::current_thread;
-	}
-	_thread::current_thread->_crit_remove_from_active();
+	_thread::current_thread->_change_lst(&this->pending);
 	__sync_synchronize();
 	interrupts();
 	yield();
@@ -56,14 +44,7 @@ void mutex::unlock() {
 		goto out;
 	}
 	this->owner = this->pending;
-	if (this->pending->mtx_lst_next == this->pending) {
-		this->pending = nullptr;
-	} else {
-		this->pending = this->pending->mtx_lst_next;
-		this->pending->mtx_lst_prev = this->owner->mtx_lst_prev;
-		this->pending->mtx_lst_prev->mtx_lst_next = this->pending;
-	}
-	this->owner->_crit_add_to_active();
+	this->owner->_change_lst(&_thread::active_threads);
 out:
 	__sync_synchronize();
 	interrupts();

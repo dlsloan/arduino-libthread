@@ -6,9 +6,9 @@
 #include <mutex.h>
 #include <lock.h>
 
-_thread _thread::main_thread;
+_thread *_thread::active_threads;
+_thread _thread::main_thread(&_thread::active_threads);
 _thread *_thread::current_thread = &_thread::main_thread;
-_thread *_thread::next_thread = &_thread::main_thread;
 
 static void *thread_start(void *_th) {
 	_thread *th = (_thread *)_th;
@@ -16,48 +16,65 @@ static void *thread_start(void *_th) {
 	th->func = nullptr;
 	noInterrupts();
 	__sync_synchronize();
-	th->_crit_remove_from_active();
+	th->_change_lst(nullptr);
 	__sync_synchronize();
 	interrupts();
 	th->join_mtx.unlock();
 	yield();
 }
 
-_thread::_thread() : active_lst_next(this), active_lst_prev(this),
-	mtx_lst_next(nullptr), mtx_lst_prev(nullptr), sp(nullptr),
-	data(nullptr), func(nullptr), join_mtx(this) {}
+_thread::_thread(_thread **lst) : lst(nullptr), next(this), prev(this),
+		sp(nullptr), data(nullptr), func(nullptr), join_mtx(this) {
+	this->_change_lst(lst);
+}
 
 _thread::_thread(void *(*func)(void *), void *data, void *stack, int stacksize):
-		active_lst_next(nullptr), active_lst_prev(nullptr),
-		mtx_lst_next(nullptr), mtx_lst_prev(nullptr),
-		data(nullptr), func(func), join_mtx(this)
+		lst(nullptr), next(this), prev(this), data(nullptr), func(func),
+		join_mtx(this)
 {
 	sp = asm_task_init(thread_start, this, stack, stacksize);
 }
 
 bool _thread::active() {
-	return !this->done() && (this->active_lst_next != nullptr);
+	return this->lst == &_thread::active_threads;
 }
 
 bool _thread::done() {
 	return this->func == nullptr;
 }
 
-void _thread::_crit_add_to_active() {
-	assert(!this->done());
-	this->active_lst_next = _thread::next_thread;
-	this->active_lst_prev = _thread::next_thread->active_lst_prev;
-	_thread::next_thread->active_lst_prev->active_lst_next = this;
-	_thread::next_thread->active_lst_prev = this;
-}
-
-void _thread::_crit_remove_from_active() {
-	if (this == _thread::next_thread) {
-		assert(this->active_lst_next != this);
-		_thread::next_thread = _thread::next_thread->active_lst_next;
+void _thread::_change_lst(_thread **lst) {
+	if (this->lst == lst)
+		return;
+	if (this->lst != nullptr) {
+		if ((*this->lst)->next == *this->lst) {
+			// last element in list
+			*this->lst = nullptr;
+		} else {
+			// currently the list base
+			if (*this->lst == this)
+				*this->lst = (*this->lst)->next;
+			// remove from list
+			this->prev->next = this->next;
+			this->next->prev = this->prev;
+		}
 	}
-	this->active_lst_next->active_lst_prev = this->active_lst_prev;
-	this->active_lst_prev->active_lst_next = this->active_lst_next;
+	this->lst = lst;
+	// no list
+	if (this->lst == nullptr)
+		return;
+	if (*this->lst == nullptr) {
+		// empty list
+		this->next = this;
+		this->prev = this;
+		*this->lst = this;
+	} else {
+		// add to end of list
+		this->prev = (*this->lst)->prev;
+		this->next = *this->lst;
+		this->prev->next = this;
+		this->next->prev = this;
+	}
 }
 
 void _thread::activate() {
@@ -66,7 +83,7 @@ void _thread::activate() {
 	if (this->active() || this->done())
 		goto out;
 
-	this->_crit_add_to_active();
+	this->_change_lst(&_thread::active_threads);
 out:
 	__sync_synchronize();
 	interrupts();
@@ -75,7 +92,7 @@ out:
 void _thread::deactivate() {
 	noInterrupts();
 	__sync_synchronize();
-	this->_crit_remove_from_active();
+	this->_change_lst(nullptr);
 	__sync_synchronize();
 	interrupts();
 	yield();
@@ -89,7 +106,7 @@ void *_thread::join() {
 
 void *cpp_swap(void *sp) {
 	_thread::current_thread->sp = sp;
-	_thread::current_thread = _thread::next_thread;
-	_thread::next_thread = _thread::next_thread->active_lst_next;
+	_thread::current_thread = _thread::active_threads;
+	_thread::active_threads = _thread::active_threads->next;
 	return _thread::current_thread->sp;
 }
